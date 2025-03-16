@@ -168,7 +168,7 @@ class _NumberCounterState extends State<NumberCounter> {
   }
 }
 
-class AnimatedNumberDisplay extends StatelessWidget {
+class AnimatedNumberDisplay extends StatefulWidget {
   final int value;
   final TextStyle style;
 
@@ -179,41 +179,177 @@ class AnimatedNumberDisplay extends StatelessWidget {
   });
 
   @override
+  State<AnimatedNumberDisplay> createState() => _AnimatedNumberDisplayState();
+}
+
+class _AnimatedNumberDisplayState extends State<AnimatedNumberDisplay> {
+  late int _oldValue;
+  late int _newValue;
+
+  @override
+  void initState() {
+    super.initState();
+    _oldValue = widget.value;
+    _newValue = widget.value;
+  }
+
+  @override
+  void didUpdateWidget(AnimatedNumberDisplay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != oldWidget.value) {
+      _oldValue = oldWidget.value;
+      _newValue = widget.value;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Convert the number to a string without leading zeros
-    final valueString = value.toString();
+    final oldValueString = _oldValue.toString();
+    final newValueString = _newValue.toString();
     
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: valueString.split('').map((digit) {
-        return Container(
-          width: 60,
-          height: 100,
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          decoration: BoxDecoration(
-            color: Theme.of(context).brightness == Brightness.dark 
-                ? Colors.grey[900] 
-                : Colors.grey[200],
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: AnimatedDigit(
-            digit: digit,
-            style: style,
+    // Use newValueString.length as the digit count for display
+    final int displayLength = newValueString.length;
+    String paddedOldValue;
+    if (oldValueString.length < displayLength) {
+      paddedOldValue = oldValueString.padLeft(displayLength, '0');
+    } else if (oldValueString.length > displayLength) {
+      paddedOldValue = oldValueString.substring(oldValueString.length - displayLength);
+    } else {
+      paddedOldValue = oldValueString;
+    }
+    
+    // For the new value, we already have proper digit count
+    final String paddedNewValue = newValueString;
+    
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: List.generate(displayLength, (index) {
+          final oldDigit = paddedOldValue[index];
+          final newDigit = paddedNewValue[index];
+          // No leading zero logic needed since we are using displayLength
+          return AnimatedDigitContainer(
+            oldDigit: oldDigit,
+            newDigit: newDigit,
+            style: widget.style,
+            isLeadingZero: false,
+            animationDelay: Duration(milliseconds: 50 * index),
+            shouldAnimate: true,
+          );
+        }),
+      ),
+    );
+  }
+}
+
+class AnimatedDigitContainer extends StatefulWidget {
+  final String oldDigit;
+  final String newDigit;
+  final TextStyle style;
+  final bool isLeadingZero;
+  final Duration animationDelay;
+  final bool shouldAnimate;
+
+  const AnimatedDigitContainer({
+    super.key,
+    required this.oldDigit,
+    required this.newDigit,
+    required this.style,
+    required this.isLeadingZero,
+    required this.animationDelay,
+    this.shouldAnimate = true,
+  });
+
+  @override
+  State<AnimatedDigitContainer> createState() => _AnimatedDigitContainerState();
+}
+
+class _AnimatedDigitContainerState extends State<AnimatedDigitContainer> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _opacityAnimation;
+  bool _visible = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    
+    _opacityAnimation = Tween<double>(
+      begin: 1.0,
+      end: 0.0,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    ));
+    
+    if (widget.isLeadingZero) {
+      // Immediately hide leading zeros on digit reduction
+      if (!widget.shouldAnimate) {
+        _visible = false;
+      } else {
+        Future.delayed(widget.animationDelay, () {
+          if (mounted) {
+            _controller.forward().then((_) {
+              if (mounted) {
+                setState(() {
+                  _visible = false;
+                });
+              }
+            });
+          }
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_visible && widget.isLeadingZero) {
+      return const SizedBox(width: 0);
+    }
+    
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return AnimatedOpacity(
+          opacity: widget.isLeadingZero ? _opacityAnimation.value : 1.0,
+          duration: const Duration(milliseconds: 200),
+          child: Container(
+            width: 45, 
+            height: 100,
+            margin: const EdgeInsets.symmetric(horizontal: 1),
+            child: AnimatedDigit(
+              oldDigit: widget.oldDigit,
+              newDigit: widget.newDigit,
+              style: widget.style,
+              animationDelay: widget.animationDelay,
+              shouldAnimate: widget.shouldAnimate && widget.oldDigit != widget.newDigit,
+            ),
           ),
         );
-      }).toList(),
+      },
     );
   }
 }
 
 class AnimatedDigit extends StatefulWidget {
-  final String digit;
+  final String oldDigit;
+  final String newDigit;
   final TextStyle style;
+  final Duration animationDelay;
+  final bool shouldAnimate;
 
   const AnimatedDigit({
     super.key,
-    required this.digit,
+    required this.oldDigit,
+    required this.newDigit,
     required this.style,
+    required this.animationDelay,
+    this.shouldAnimate = true,
   });
 
   @override
@@ -225,16 +361,12 @@ class _AnimatedDigitState extends State<AnimatedDigit> with SingleTickerProvider
   late Animation<double> _positionAnimation;
   late Animation<double> _opacityAnimation;
   late Animation<double> _blurAnimation;
-  String _oldDigit = '';
-  String _newDigit = '';
   bool _isAnimating = false;
   bool _isIncrementing = true;
 
   @override
   void initState() {
     super.initState();
-    _oldDigit = widget.digit;
-    _newDigit = widget.digit;
     
     _controller = AnimationController(
       duration: const Duration(milliseconds: 500),
@@ -251,44 +383,48 @@ class _AnimatedDigitState extends State<AnimatedDigit> with SingleTickerProvider
       end: 1.0,
     ).animate(CurvedAnimation(
       parent: _controller,
-      curve: const Interval(0.0, 0.5, curve: Curves.easeInOut),
+      curve: const Interval(0.0, 0.6, curve: Curves.easeInOut),
     ));
 
     _blurAnimation = Tween<double>(
       begin: 0.0,
-      end: 1.0,
+      end: 2.0,
     ).animate(CurvedAnimation(
       parent: _controller,
-      curve: const Interval(0.0, 0.5, curve: Curves.easeInOut),
+      curve: const Interval(0.0, 0.6, curve: Curves.easeInOut),
     ));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
+    
+    if (widget.shouldAnimate && widget.oldDigit != widget.newDigit) {
+      Future.delayed(widget.animationDelay, () {
+        if (mounted) {
+          _startAnimation();
+        }
+      });
+    }
   }
 
   @override
   void didUpdateWidget(AnimatedDigit oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.digit != oldWidget.digit && !_isAnimating) {
-      _startAnimation();
+    if (widget.shouldAnimate && widget.newDigit != oldWidget.newDigit && !_isAnimating) {
+      Future.delayed(widget.animationDelay, () {
+        if (mounted) {
+          _startAnimation();
+        }
+      });
     }
   }
 
   void _startAnimation() {
     _isAnimating = true;
-    _oldDigit = _newDigit;
-    _newDigit = widget.digit;
     
     // Determine animation direction
-    if (_oldDigit == '9' && _newDigit == '0') {
+    if (widget.oldDigit == '9' && widget.newDigit == '0') {
       _isIncrementing = true;
-    } else if (_oldDigit == '0' && _newDigit == '9') {
+    } else if (widget.oldDigit == '0' && widget.newDigit == '9') {
       _isIncrementing = false;
     } else {
-      _isIncrementing = int.parse(_newDigit) > int.parse(_oldDigit);
+      _isIncrementing = int.parse(widget.newDigit) > int.parse(widget.oldDigit);
     }
 
     _controller.reset();
@@ -299,6 +435,16 @@ class _AnimatedDigitState extends State<AnimatedDigit> with SingleTickerProvider
 
   @override
   Widget build(BuildContext context) {
+    // If we shouldn't animate, just show the new digit immediately
+    if (!widget.shouldAnimate) {
+      return Center(
+        child: Text(
+          widget.newDigit,
+          style: widget.style,
+        ),
+      );
+    }
+    
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: AnimatedBuilder(
@@ -315,14 +461,14 @@ class _AnimatedDigitState extends State<AnimatedDigit> with SingleTickerProvider
                 right: 0,
                 child: ImageFiltered(
                   imageFilter: ui.ImageFilter.blur(
-                    sigmaX: _blurAnimation.value * 4,
-                    sigmaY: _blurAnimation.value * 4,
+                    sigmaX: _blurAnimation.value * 6,
+                    sigmaY: _blurAnimation.value * 6,
                   ),
                   child: Opacity(
                     opacity: 1 - _opacityAnimation.value,
                     child: Center(
                       child: Text(
-                        _oldDigit,
+                        widget.oldDigit,
                         style: widget.style,
                       ),
                     ),
@@ -338,14 +484,14 @@ class _AnimatedDigitState extends State<AnimatedDigit> with SingleTickerProvider
                 right: 0,
                 child: ImageFiltered(
                   imageFilter: ui.ImageFilter.blur(
-                    sigmaX: (1 - _blurAnimation.value) * 4,
-                    sigmaY: (1 - _blurAnimation.value) * 4,
+                    sigmaX: (1 - _blurAnimation.value) * 6,
+                    sigmaY: (1 - _blurAnimation.value) * 6,
                   ),
                   child: Opacity(
                     opacity: _opacityAnimation.value,
                     child: Center(
                       child: Text(
-                        _newDigit,
+                        widget.newDigit,
                         style: widget.style,
                       ),
                     ),
